@@ -259,6 +259,13 @@ def _gemm(op, graph, tensors, initializer):
     if "transB" in attrs and attrs["transB"] == 1:
         inputs[1] = graph.transpose(inputs[1], (1,0), shuffle=True)
     outputs = graph.matmul(inputs[0], inputs[1])
+    # ONNX Gemm's optional third input C (bias) was previously dropped here
+    # entirely -- any Linear-layer bias silently vanished from the imported
+    # graph. TASO's element-wise add broadcasts per Model::broadcastable
+    # (element.cc), so a [out_features] bias against a [..., out_features]
+    # matmul result works directly with no reshape needed.
+    if len(inputs) == 3:
+        outputs = graph.add(outputs, inputs[2])
     return outputs
 
 def _greater(op, graph, tensors, initializer):
