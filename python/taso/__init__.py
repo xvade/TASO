@@ -187,6 +187,17 @@ def _concat(op, graph, tensors, initializer):
     outputs = graph.concat(axis, inputs)
     return outputs
 
+# ONNX lets a node get a constant tensor two ways: baked into the graph's
+# top-level `initializer` list, or produced by a `Constant` node elsewhere
+# in the graph (its value living in that node's own `value` attribute, not
+# in `initializer` at all). PyTorch's exporter uses the latter for
+# Reshape's shape argument whenever the model has a real Reshape node
+# (rather than TASO's own Flatten path) -- e.g. any residual/ResNet-style
+# model. Handlers that only scan `initializer` (see _reshape below) miss
+# this entirely and silently get an empty result. Populated by _constant()
+# below, reset at the start of each load_onnx() call.
+_constant_node_values = dict()
+
 def _constant(op, graph, tensors, initializer):
     inputs = _get_inputs(op, graph, tensors, initializer)
     attrs = _parse_attribute(op.attribute)
@@ -197,6 +208,7 @@ def _constant(op, graph, tensors, initializer):
     for dim in tensor.dims:
         dims.append(dim)
     weight_data = numpy_helper.to_array(tensor)
+    _constant_node_values[op.output[0]] = weight_data
     outputs = graph.new_weight(dims=tuple(dims), data=weight_data)
     return outputs
 
@@ -464,6 +476,11 @@ def _reshape(op, graph, tensors, initializer):
                 shape_in_array = numpy_helper.to_array(data)
                 for dim in shape_in_array:
                     shape.append(dim)
+    if not shape and op.input[1] in _constant_node_values:
+        # Shape came from a Constant *node* (its own `value` attribute),
+        # not a graph-level initializer -- see _constant_node_values above.
+        shape = [int(d) for d in _constant_node_values[op.input[1]]]
+    assert shape, "Reshape's shape argument not found in initializer or Constant nodes"
     outputs = graph.reshape(inputs[0], tuple(shape))
     return outputs
 
@@ -715,6 +732,7 @@ def load_onnx(filename):
     graph = core.PyGraph()
     model = onnx.load(filename)
     tensors = dict()
+    _constant_node_values.clear()
     for t in model.graph.input:
         dims = list()
         for d in t.type.tensor_type.shape.dim:
