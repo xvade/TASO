@@ -548,6 +548,18 @@ cdef class PyGraph:
         graph = ctypes.cast(<unsigned long long>new_graph, ctypes.c_void_p)
         return PyGraph(graph)
 
+    def preprocess_weights(self):
+        # Folds any op whose inputs are all Weight nodes (e.g. a rewrite's
+        # Transpose(weight) or Concat(weight, weight)) into a single new
+        # literal Weight node holding the real computed values -- the same
+        # step Graph::optimize() already runs internally (ops.cc) before
+        # its own export_onnx()/run(). Exposed here so a graph rebuilt from
+        # elsewhere (e.g. tensat's exported model format) with real weight
+        # data attached can be folded the same way before export_onnx().
+        cdef Graph* new_graph = self.p_graph.preprocess_weights()
+        graph = ctypes.cast(<unsigned long long>new_graph, ctypes.c_void_p)
+        return PyGraph(graph)
+
     def get_operator_list(self):
         cdef Op ops[4192]
         cdef int numOps = self.p_graph.get_operator_list(ops, 4192)
