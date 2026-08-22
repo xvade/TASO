@@ -670,7 +670,12 @@ int Graph::get_operator_int_attr(size_t guid, PMParameter attr)
 {
   Op op = find_op_or_fail(guid);
   int ret;
-  assert(op.ptr->get_int_parameter(attr, &ret));
+  // NOTE: get_int_parameter() has a real side effect (populating ret) and
+  // must always be called, even in NDEBUG/Release builds where assert()'s
+  // argument is never evaluated -- do not fold this back into a bare
+  // assert(op.ptr->get_int_parameter(attr, &ret)).
+  bool found = op.ptr->get_int_parameter(attr, &ret);
+  assert(found);
   return ret;
 }
 

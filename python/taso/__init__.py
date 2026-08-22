@@ -210,6 +210,17 @@ def _conv2d(op, graph, tensors, initializer):
     pads = _get_conv_pool_pads_attr(attrs)
     strides = attrs["strides"]
     outputs = graph.conv2d(input=inputs[0], weight=inputs[1], strides=strides, padding=pads)
+    # ONNX Conv's optional third input (per-output-channel bias) was
+    # previously fetched but never used -- same class of bug as _gemm's
+    # (see git history). Unlike Gemm's bias, whose [out_features] shape
+    # already aligns with the trailing axis, a conv bias is [C] against an
+    # [N,C,H,W] output -- TASO's add() only does NumPy-style trailing-dim
+    # broadcast (Model::broadcastable, element.cc), so the bias must be
+    # reshaped to [1,C,1,1] first to line up the channel axis.
+    if len(inputs) == 3:
+        num_channels = inputs[2].dim(0)
+        bias = graph.reshape(inputs[2], (1, num_channels, 1, 1))
+        outputs = graph.add(outputs, bias)
     return outputs
 
 def _div(op, graph, tensors, initializer):
