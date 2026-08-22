@@ -1,4 +1,5 @@
 build/
+build_gpu/
 *.onnx
 examples/timer.txt
 graphviz*
@@ -6,6 +7,8 @@ python/build/
 python/dist/
 python/taso.egg-info/
 python/taso/_cython/core.cpp
+python/taso/*.so
+python/taso/__pycache__/
 *timer.txt
 *time.txt
 *timer_bert.txt

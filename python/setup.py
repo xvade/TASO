@@ -27,6 +27,13 @@ else:
 
 def config_cython():
     sys_cflags = sysconfig.get_config_var("CFLAGS")
+    # library_dirs isn't set below, so linking taso_runtime relied on
+    # LDFLAGS="-L..." from the environment -- but that gets word-split on
+    # spaces by distutils/setuptools, which breaks on any checkout path
+    # containing a space. Read TASO_LIB_DIR directly instead (same env var
+    # tensat/build.rs already uses for this), passed as a real list
+    # element so no shell-style splitting can happen.
+    taso_lib_dir = os.environ.get("TASO_LIB_DIR", "../build")
     try:
         from Cython.Build import cythonize
         ret = []
@@ -39,8 +46,9 @@ def config_cython():
                 ["%s/%s" % (path, fn)],
                 include_dirs=["../include", "/usr/local/cuda/include"],
                 libraries=["taso_runtime"],
+                library_dirs=[taso_lib_dir],
                 extra_compile_args=["-DUSE_CUDNN", "-std=c++11"],
-                extra_link_args=[],
+                extra_link_args=["-Wl,-rpath," + taso_lib_dir],
                 language="c++"))
         return cythonize(ret, compiler_directives={"language_level" : 3})
     except ImportError:
