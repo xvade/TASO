@@ -781,6 +781,12 @@ def load_onnx(filename):
             continue
     return graph
 
+# TASO's op_table names (core.pyx) that don't match ONNX's official op
+# spelling exactly -- used only by export_onnx() when constructing nodes.
+_onnx_op_name_overrides = {
+    "Matmul": "MatMul",
+}
+
 input_weight_names = dict()
 input_weight_names['Add'] = ['input1', 'input2']
 input_weight_names['AveragePool'] = ['input']
@@ -890,7 +896,14 @@ def export_onnx(graph):
         for i in range(graph.get_num_outputs(op)):
             outputs.append(_output_tensor_name(graph, op, i))
             output_guids[(op['guid'], i)] = op
-        node = helper.make_node(mytype, inputs, outputs, '{}{}'.format(mytype, op['guid']))
+        # TASO's own op-table name (mytype) matches ONNX's official spelling
+        # for most ops (Relu, Add, Reshape, ...) but not all -- e.g. "Matmul"
+        # vs ONNX's "MatMul". helper.make_node needs the exact ONNX name, so
+        # map known mismatches here; _add_node_attribute below still needs
+        # the *TASO* name (operator_attrs is keyed on that), so only the
+        # op_type string passed to make_node is remapped.
+        onnx_op_type = _onnx_op_name_overrides.get(mytype, mytype)
+        node = helper.make_node(onnx_op_type, inputs, outputs, '{}{}'.format(mytype, op['guid']))
         _add_node_attribute(graph, node, op, mytype)
         graph_nodes.append(node)
     for guid, idx in output_guids:
