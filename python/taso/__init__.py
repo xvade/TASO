@@ -939,6 +939,23 @@ def export_onnx(graph):
         op = output_guids[(guid, idx)]
         graph_outputs.append(helper.make_tensor_value_info(_output_tensor_name(graph, op, idx),
                              TensorProto.FLOAT, graph.get_output_dims(op, idx)))
+    # Every Weight and every Reshape's shape constant gets added to both
+    # graph_initializers (as a real value) and graph_inputs (as a formal
+    # graph input) above -- per the ONNX spec, a name in both is merely an
+    # "optional input with a default", but not every consumer treats it
+    # that way. onnxruntime tolerates it with just a warning ("will not
+    # be treated as constant value/weight ... remove_initializer_from_
+    # input.py"), and has done so silently in every model this project
+    # has exported. alpha-beta-CROWN's auto_LiRPA does not: it built
+    # actual Split/Squeeze/Unsqueeze/Concat bound-propagation machinery
+    # to treat these merely-formal "inputs" as if they were genuinely
+    # perturbable, which broke down with a bound-tensor shape mismatch
+    # deep in its own internals on every model reconstructed this
+    # session, fused or not. Filter initializers out of graph_inputs
+    # before building the graph -- the standard ONNX-tooling fix for
+    # exactly this warning.
+    initializer_names = {init.name for init in graph_initializers}
+    graph_inputs = [gi for gi in graph_inputs if gi.name not in initializer_names]
     onnx_graph = helper.make_graph(graph_nodes, 'main', graph_inputs, graph_outputs, graph_initializers)
     onnx_model = helper.make_model(onnx_graph, producer_name='TASO Optimized Model')
     return onnx_model
