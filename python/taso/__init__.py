@@ -697,6 +697,10 @@ xf_operators['Reshape'] = _reshape
 xf_operators['Relu'] = _relu
 xf_operators['Round'] = _round
 xf_operators['Matmul'] = _matmul
+xf_operators['MatMul'] = _matmul  # ONNX's standard op name is "MatMul" (capital M); the
+                                  # lowercase-only key silently skipped every MatMul in
+                                  # pure FC/MatMul graphs (e.g. tll), degenerating them to
+                                  # inputs+weights with zero compute ops. See BUGS.md.
 xf_operators['Max'] = _max
 xf_operators['MaxPool'] = _maxpool2d
 xf_operators['Min'] = _min
