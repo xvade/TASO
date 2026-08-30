@@ -1382,7 +1382,10 @@ void dfs(int depth,
   } else {
     hashmap[hashKey] = graph;
   }
-  if (depth >= 3) return; // MAX_NUM_OPS
+#ifndef GEN_MAX_DEPTH
+#define GEN_MAX_DEPTH 3
+#endif
+  if (depth >= GEN_MAX_DEPTH) return; // enumeration depth (override with -DGEN_MAX_DEPTH=N)
   for (int i = 0; i < ops.size(); i++)
     switch (ops[i]->type) {
       case OP_EW_ADD:
