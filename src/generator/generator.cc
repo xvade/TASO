@@ -807,7 +807,8 @@ class ElementTemp : public OpTemp {
 public:
   ElementTemp(OpType _type)
   : OpTemp(2, 1, _type) {
-    assert(_type == OP_EW_ADD || _type == OP_EW_MUL);
+    assert(_type == OP_EW_ADD || _type == OP_EW_MUL
+        || _type == OP_EW_SUB || _type == OP_EW_MAX || _type == OP_EW_MIN);
   }
   bool compute(int n, TensorTemp* inputs, int opIdx)
   {
@@ -843,10 +844,19 @@ public:
     if (type == OP_EW_ADD) {
       for (int i = 0; i < total; i++)
         outputs[0].data[i] = x1.data[i] + x2.data[i];
-    } else {
-      assert(type == OP_EW_MUL);
+    } else if (type == OP_EW_MUL) {
       for (int i = 0; i < total; i++)
         outputs[0].data[i] = x1.data[i] * x2.data[i];
+    } else if (type == OP_EW_SUB) {
+      for (int i = 0; i < total; i++)
+        outputs[0].data[i] = x1.data[i] - x2.data[i];
+    } else if (type == OP_EW_MAX) {
+      for (int i = 0; i < total; i++)
+        outputs[0].data[i] = (x1.data[i] > x2.data[i]) ? x1.data[i] : x2.data[i];
+    } else {
+      assert(type == OP_EW_MIN);
+      for (int i = 0; i < total; i++)
+        outputs[0].data[i] = (x1.data[i] < x2.data[i]) ? x1.data[i] : x2.data[i];
     }
     outputs[0].opIdx = opIdx;
     outputs[0].tsIdx = 0;
@@ -1377,11 +1387,29 @@ void dfs(int depth,
     switch (ops[i]->type) {
       case OP_EW_ADD:
       case OP_EW_MUL:
+      case OP_EW_MAX:
+      case OP_EW_MIN:
       {
+        // commutative elementwise: unordered pairs
         OpTemp* op = ops[i];
         for (int j = 0; j < inputs.size(); j++)
           for (int k = j + 1; k < inputs.size(); k++)
             if (op->compute(inputs[j], inputs[k], depth)) {
+              inputs.push_back(op->outputs[0]);
+              graph.push_op(op, inputs[j], inputs[k]);
+              dfs(depth + 1, graph, inputs, ops, hashmap, transfers);
+              graph.pop_op();
+              inputs.pop_back();
+            }
+        break;
+      }
+      case OP_EW_SUB:
+      {
+        // non-commutative: ordered distinct pairs (both a-b and b-a; skip a-a=0)
+        OpTemp* op = ops[i];
+        for (int j = 0; j < inputs.size(); j++)
+          for (int k = 0; k < inputs.size(); k++)
+            if (j != k && op->compute(inputs[j], inputs[k], depth)) {
               inputs.push_back(op->outputs[0]);
               graph.push_op(op, inputs[j], inputs[k]);
               dfs(depth + 1, graph, inputs, ops, hashmap, transfers);
@@ -1597,6 +1625,9 @@ void pb_fill_op(const GraphTemp::GraphOp& graphOp,
     case OP_MUL:
     case OP_EW_ADD:
     case OP_EW_MUL:
+    case OP_EW_SUB:
+    case OP_EW_MAX:
+    case OP_EW_MIN:
     {
       break;
     }
@@ -1734,6 +1765,24 @@ int main(int argc, char **argv)
   operator_names[ops.back()] = "EWAdd";
   ops.push_back(new ElementTemp(OP_EW_MUL));
   operator_names[ops.back()] = "EWMul";
+  // ---- elementwise ops added for verifiability-relevant (piecewise-linear)
+  // rewrites: subtraction, max, min. Already in TASO core (ops.h). ----
+  ops.push_back(new ElementTemp(OP_EW_SUB));
+  operator_names[ops.back()] = "EWSub";
+  ops.push_back(new ElementTemp(OP_EW_MAX));
+  operator_names[ops.back()] = "EWMax";
+  ops.push_back(new ElementTemp(OP_EW_MIN));
+  operator_names[ops.back()] = "EWMin";
+#ifdef PWL_FOCUS
+  // Focused op set for the min/max/relu milestone: drop conv/pool/concat/split/
+  // constants/enlarge so depth-3 is fast and depth-4 is priceable. Keep only the
+  // ops that participate in piecewise-linear identities (matmul already added;
+  // transpose added after this block).
+  ops.push_back(new ActivationTemp(OP_RELU));
+  operator_names[ops.back()] = "Relu";
+  ops.push_back(new ScalarMulTemp());
+  operator_names[ops.back()] = "ScalarMul";
+#else
   ops.push_back(new Conv2DTemp(3, 3, 1, 1, true, false));
   operator_names[ops.back()] = "Conv3x3S";
   ops.push_back(new Conv2DTemp(3, 3, 1, 1, true, true));
@@ -1781,6 +1830,7 @@ int main(int argc, char **argv)
   operator_names[ops.back()] = "Split_1";
   ops.push_back(new SplitTemp(2/*n*/, 0/*axis*/));
   operator_names[ops.back()] = "Split_0";
+#endif // PWL_FOCUS
   const int trans10[2] = {1, 0};
   // Should enable shuffle = true one
   ops.push_back(new TransposeTemp(2/*n*/, trans10, false/*shuffle*/));
