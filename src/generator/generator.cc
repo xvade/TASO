@@ -1236,20 +1236,32 @@ bool variable_ordering(const GraphTemp& g)
   return true;
 }
 
+// Quotient-relaxation toggles (set from env in main). Each suppresses a class of
+// "trivial"/cost-neutral rewrites; relaxing them lets the generator EMIT those
+// families (e.g. associativity/commutativity) so a downstream redundancy pruner can
+// rebuild a minimal-complete set. Off by default = original TASO behavior.
+bool g_relax_subgraph = false;   // skip the common-subgraph pruning
+bool g_relax_supergraph = false; // skip the common-supergraph pruning
+bool g_relax_varorder = false;   // skip the canonical variable-ordering constraint
+bool g_relax_subst = false;      // skip renaming-dedup of transfers (emits comm etc.)
+
 bool pass_checks(const GraphTemp& g1,
                  const GraphTemp& g2)
 {
   // Pruning: cannot have common subgraphs
-  for (int i = 0; i < g1.numOps; i++)
-    for (int j = 0; j < g2.numOps; j++)
-      if (find_same_subgraph(g1.op[i], g2.op[j]))
-        return false;
+  if (!g_relax_subgraph)
+    for (int i = 0; i < g1.numOps; i++)
+      for (int j = 0; j < g2.numOps; j++)
+        if (find_same_subgraph(g1.op[i], g2.op[j]))
+          return false;
   // Pruning: cannot have common supergraphs
-  if (find_same_supergraph(g1.op[g1.numOps-1], g2.op[g2.numOps-1]))
-    return false;
+  if (!g_relax_supergraph)
+    if (find_same_supergraph(g1.op[g1.numOps-1], g2.op[g2.numOps-1]))
+      return false;
   // Pruning: check variable ordering (x1 used before x2 before x3)
-  if ((!variable_ordering(g1)) && (!variable_ordering(g2)))
-    return false;
+  if (!g_relax_varorder)
+    if ((!variable_ordering(g1)) && (!variable_ordering(g2)))
+      return false;
   // Pruning: variable renaming (e.g., "x1" must appear before "x2")
   return true;
 }
@@ -1330,6 +1342,7 @@ void dfs(int depth,
     if (pass_checks(oldgraph, graph)) {
       // Pruning: cannot have redundant transfers via variable substitutions
       bool found = false;
+      if (!g_relax_subst)
       for (int i = 0; i < transfers.size(); i++)
         if (!(transfers[i].isDuplicate)) {
           // first->oldgraph, second->graph
@@ -1927,6 +1940,13 @@ int main(int argc, char **argv)
   assert(ew_mul->compute(i1, o1, 1));
   o2 = ew_mul->outputs[0];
   assert(o2 == i1);
+
+  g_relax_subgraph   = getenv("RELAX_SUBGRAPH")   != nullptr;
+  g_relax_supergraph = getenv("RELAX_SUPERGRAPH") != nullptr;
+  g_relax_varorder   = getenv("RELAX_VARORDER")   != nullptr;
+  g_relax_subst      = getenv("RELAX_SUBST")      != nullptr;
+  printf("quotient relaxation: subgraph=%d supergraph=%d varorder=%d subst=%d\n",
+         g_relax_subgraph, g_relax_supergraph, g_relax_varorder, g_relax_subst);
 
   dfs(0, graph, inputs, ops, hashmap, transfers);
   printf("===================== Generated %zu Transfers =====================\n", transfers.size());
