@@ -1244,6 +1244,8 @@ bool g_relax_subgraph = false;   // skip the common-subgraph pruning
 bool g_relax_supergraph = false; // skip the common-supergraph pruning
 bool g_relax_varorder = false;   // skip the canonical variable-ordering constraint
 bool g_relax_subst = false;      // skip renaming-dedup of transfers (emits comm etc.)
+bool g_gen_commute = false;      // enumerate commutative-op operands in BOTH orders (k from 0,
+                                 // k!=j) so max(a,b)==max(b,a) collides -> emits binary commutativity
 
 bool pass_checks(const GraphTemp& g1,
                  const GraphTemp& g2)
@@ -1406,11 +1408,13 @@ void dfs(int depth,
       case OP_EW_MAX:
       case OP_EW_MIN:
       {
-        // commutative elementwise: unordered pairs
+        // commutative elementwise: unordered pairs (k=j+1). With GEN_COMMUTE, enumerate
+        // BOTH orders (k from 0, k!=j) so max(a,b) and max(b,a) are both built and collide,
+        // emitting the binary-commutativity rule the canonical order otherwise suppresses.
         OpTemp* op = ops[i];
         for (int j = 0; j < inputs.size(); j++)
-          for (int k = j + 1; k < inputs.size(); k++)
-            if (op->compute(inputs[j], inputs[k], depth)) {
+          for (int k = (g_gen_commute ? 0 : j + 1); k < inputs.size(); k++)
+            if ((!g_gen_commute || k != j) && op->compute(inputs[j], inputs[k], depth)) {
               inputs.push_back(op->outputs[0]);
               graph.push_op(op, inputs[j], inputs[k]);
               dfs(depth + 1, graph, inputs, ops, hashmap, transfers);
@@ -1945,6 +1949,7 @@ int main(int argc, char **argv)
   g_relax_supergraph = getenv("RELAX_SUPERGRAPH") != nullptr;
   g_relax_varorder   = getenv("RELAX_VARORDER")   != nullptr;
   g_relax_subst      = getenv("RELAX_SUBST")      != nullptr;
+  g_gen_commute      = getenv("GEN_COMMUTE")      != nullptr;
   printf("quotient relaxation: subgraph=%d supergraph=%d varorder=%d subst=%d\n",
          g_relax_subgraph, g_relax_supergraph, g_relax_varorder, g_relax_subst);
 

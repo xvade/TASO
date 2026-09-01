@@ -939,6 +939,9 @@ void Graph::export_op(ofstream &file_stream, Op &op)
     case OP_ENLARGE:
     case OP_EW_ADD:
     case OP_EW_MUL:
+    case OP_EW_SUB:
+    case OP_EW_MAX:
+    case OP_EW_MIN:
     case OP_RELU:
     case OP_TANH:
     case OP_BATCHNORM:
