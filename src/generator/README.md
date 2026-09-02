@@ -3,10 +3,39 @@
 The generator (`generator.cc`) enumerates candidate graph-rewrite rules
 ("transfers") by DFS over small operator graphs, checks each pair of graphs for
 equivalence on random inputs, and writes the surviving rewrites to
-`graph_subst.pb`. This is upstream TASO; the notes below cover **only this
-project's modifications** — see `../../../BUGS.md` and the top-level
-`../../../PROGRESS.md` for the why, and `../../../PROBLEMATIC.md` for the parts
-that resist testing.
+`graph_subst.pb`. This is upstream TASO — but the whole file is our code now, so
+the algorithm is documented below, then this project's modifications. See
+`../../../BUGS.md` / `../../../PROGRESS.md` for the why and `../../../PROBLEMATIC.md`
+for the parts that resist testing.
+
+## How it works (the upstream algorithm — TASO OSDI'19 §4)
+
+TASO generates substitutions by **enumerate-evaluate-fingerprint**, not by symbolic
+search:
+
+1. **Enumerate.** `dfs(depth, graph, inputs, ops, hashmap, transfers)` (~line 1302)
+   grows a candidate op DAG (a `GraphTemp` of `TensorTemp`s) one operator at a time up
+   to `GEN_MAX_DEPTH`, over a fixed set of symbolic input tensors and the enabled op set
+   (restricted by `PWL_FOCUS`). Each recursion appends one op whose operands are existing
+   tensors in the partial graph.
+2. **Evaluate on concrete random inputs.** Every op has a small `dfs`-based *forward
+   evaluator* (e.g. the transpose/reduce/pool evaluators at ~925/974/1075) that computes
+   the op's output *values* from the random input tensors — the generator actually runs
+   the candidate graph on numbers.
+3. **Fingerprint + collide.** The resulting output tensor is hashed into `hashmap`. Two
+   distinct graphs that land in the same bucket compute the *same function on the random
+   inputs* → a **candidate equivalence**. `pass_checks` (~1250) filters degenerate/invalid
+   pairs (shape mismatch, trivial, etc.).
+4. **Emit.** Each surviving equivalent pair becomes a source→target `transfer`,
+   serialized to `graph_subst.pb` as a `RuleCollection` protobuf.
+
+**Equivalence here is probabilistic** (agreement on random inputs), not a proof — which
+is exactly why the downstream pipeline re-verifies every emitted rule: tensat's `-m verify`
+axiom saturation and the Z3 lane (`../../../NNs/z3_verify_egg.py`) are the soundness
+oracles, and `pb2egg.py` only emits rules that survive them. The generator's job is
+*recall* (produce candidates); verification supplies *soundness*.
+
+## What we added
 
 ## What we added
 
