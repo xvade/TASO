@@ -14,6 +14,8 @@
  */
 
 #include <unordered_map>
+#include <cstdio>    // snprintf, std::rename (for byte-bounded pb sharding)
+#include <fstream>
 #include "xflow/ops.h"
 #include "rules.pb.h"
 typedef int TYPE;
@@ -1956,18 +1958,37 @@ int main(int argc, char **argv)
   dfs(0, graph, inputs, ops, hashmap, transfers);
   printf("===================== Generated %zu Transfers =====================\n", transfers.size());
   GOOGLE_PROTOBUF_VERIFY_VERSION;
+  // A single serialized RuleCollection has a hard 2 GB protobuf ceiling; a large
+  // (e.g. GEN_COMMUTE, full-op, relaxed) run overflows it and writes nothing. So
+  // shard the transfer stream into byte-bounded files graph_subst_000.pb,
+  // _001.pb, ... (~1 GB each). pb2egg reads the whole glob and does its existing
+  // single/multi-output split on the union. When there is exactly one shard the
+  // output keeps the legacy name graph_subst.pb so older callers still work.
+  const size_t SHARD_BYTES = 1000000000ULL;  // ~1 GB, safely under the 2 GB ceiling
   GraphSubst::RuleCollection collection;
-  size_t count = 0;
+  size_t count = 0, shard = 0, shard_bytes = 0;
+  auto flush_shard = [&]() {
+    if (collection.rule_size() == 0) return;
+    char fname[64];
+    snprintf(fname, sizeof(fname), "graph_subst_%03zu.pb", shard);
+    std::fstream out(fname, ios::out | ios::trunc | ios::binary);
+    collection.SerializeToOstream(&out);
+    printf("  shard %zu: %d rules, ~%zu bytes -> %s\n",
+           shard, collection.rule_size(), shard_bytes, fname);
+    shard++; shard_bytes = 0; collection.Clear();
+  };
   for (int i = 0; i < transfers.size(); i++)
     if (!(transfers[i].isDuplicate)) {
       count ++;
-      printf("Source Graph: %s\n", transfers[i].fstGraph.to_string().c_str());
-      printf("Target Graph: %s\n", transfers[i].sndGraph.to_string().c_str());
-      pb_fill_rule(transfers[i].fstGraph, transfers[i].sndGraph, collection.add_rule());
+      GraphSubst::Rule* r = collection.add_rule();
+      pb_fill_rule(transfers[i].fstGraph, transfers[i].sndGraph, r);
+      shard_bytes += r->ByteSizeLong();   // per-rule size: O(rule), not O(collection)
+      if (shard_bytes >= SHARD_BYTES) flush_shard();
     }
-  std::fstream outputFile("graph_subst.pb", ios::out | ios::trunc);
-  collection.SerializeToOstream(&outputFile);
+  flush_shard();
+  if (shard == 1) std::rename("graph_subst_000.pb", "graph_subst.pb");
   google::protobuf::ShutdownProtobufLibrary();
-  printf("===================== Generated %zu Transfers =====================\n", count);
+  printf("===================== Generated %zu Transfers in %zu shard(s) =====================\n",
+         count, shard);
   return 0;
 }
