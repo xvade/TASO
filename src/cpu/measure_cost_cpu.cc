@@ -9,13 +9,15 @@
  * "mem_acc" formulas each op class already computes in its own
  * (CUDA-independent) collect_costs(), over in src/core.
  *
- * These numbers are NOT real measured runtimes and should not be treated
- * as ground truth for absolute or cross-hardware runtime comparisons --
- * they only need to rank candidate rewrites in roughly the right relative
- * order so TENSAT's ILP/greedy extraction has something meaningful to
- * minimize while we don't have a GPU available. When CUDA comes back
- * online, building with USE_CUDA=ON drops this file in favor of the real
- * per-op kernel measurements -- nothing else needs to change.
+ * INVARIANT (2026-09-02): this project NEVER uses TASO's op runtime cost.
+ * It is not about runtime efficiency -- extraction is verifiability-driven
+ * (tensat's VerifCost / IBP interval-gap area), not runtime-driven. So op
+ * cost is force-zeroed here: taso performs no cost measurement, and every
+ * op->runtime is 0. This is the ONE reason a cost backend mattered to us at
+ * all (op creation calls measure_*_cost); zeroing it also means the cudnn
+ * build's cublas SGEMM at op-creation-time -- the small-N abort -- never
+ * fires via this path. Define TASO_ENABLE_COST_MEASUREMENT to restore the
+ * synthetic analytic estimate for a one-off runtime-cost experiment.
  */
 
 #include "taso/ops.h"
@@ -27,7 +29,16 @@ const float UNITS_PER_MS = 1e9f;
 
 inline float estimate_runtime(float flops, float mem_acc)
 {
+  // Zeroed by the file-level invariant above. Safe: tensat reads op->runtime
+  // in CostModel::get_self_cost but never divides by it or asserts it > 0, and
+  // our pipeline extracts with VerifCost, not the runtime-driven CostModel.
+#ifdef TASO_ENABLE_COST_MEASUREMENT
   return (flops + mem_acc) / UNITS_PER_MS;
+#else
+  (void) flops;
+  (void) mem_acc;
+  return 0.0f;
+#endif
 }
 
 inline int volume(const Tensor& t)
