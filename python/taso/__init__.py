@@ -519,6 +519,18 @@ def _relu(op, graph, tensors, initializer):
     outputs = graph.relu(input=inputs[0])
     return outputs
 
+def _sigmoid(op, graph, tensors, initializer):
+    inputs = _get_inputs(op, graph, tensors, initializer)
+    assert len(inputs) == 1, "Sigmoid requires exactly one input"
+    outputs = graph.sigmoid(input=inputs[0])
+    return outputs
+
+def _tanh(op, graph, tensors, initializer):
+    inputs = _get_inputs(op, graph, tensors, initializer)
+    assert len(inputs) == 1, "Tanh requires exactly one input"
+    outputs = graph.tanh(input=inputs[0])
+    return outputs
+
 def _round(op, graph, tensors, initializer):
     inputs = _get_inputs(op, graph, tensors, initializer)
     assert len(inputs) == 1, "Round requires exactly one input"
@@ -696,6 +708,8 @@ xf_operators['ReduceSum'] = _reducesum
 xf_operators['Reshape'] = _reshape
 xf_operators['Relu'] = _relu
 xf_operators['Round'] = _round
+xf_operators['Sigmoid'] = _sigmoid  # was UNREGISTERED -> load_onnx skipped every Sigmoid
+xf_operators['Tanh'] = _tanh        # node, degenerating sigmoid/tanh MLPs (e.g. ffnnSIGMOID)
 xf_operators['Matmul'] = _matmul
 xf_operators['MatMul'] = _matmul  # ONNX's standard op name is "MatMul" (capital M); the
                                   # lowercase-only key silently skipped every MatMul in
